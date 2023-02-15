@@ -1,9 +1,28 @@
+// (c) Mark Howe, 15th February 2023 between 10:30am and 2:30pm with a break for lunch
+
+// Known limitations
+// - only tested on one MD file!!!
+// - needs book name mapping for all books
+// - turns "verse, verse" into "verse-verse" - need to add commas to Proskmma chapterVerses
+// - ignores partial verses because there's no way to guess what someone thought part a was
+// - currently replaces everything with ULT
+// - needs to flag or fail on random markdown in a clean way
+// - scanning all files and then collecting all quotes would be much much more efficient
+
+// Also, I wouldn't do this in production
+// Instead, I'd keep the notes with the placeholders and then
+// drop in the latest quotes as the last step before publishing
+
 const path = require('path');
 const fse = require('fs-extra');
 const xre = require('xregexp');
 const {Proskomma} = require('proskomma');
 
 // Evil regexes
+
+// (Actually, they are an incredibly powerful and efficient solution to a lot of text-based issue
+//  but haters gonna hate...)
+
 const quotationRE = xre(/(^[ ]*(>[ ]+[^\n\r)]+)[\n\r]+)*(^[ ]*>[ ]+[^\n\r]+\((([I123] +)?[^ ().,;:?!\[]+ [1-9][0-9]*:[1-9][0-9]*[abcd]*([–-–-][1-9][0-9]*[abcd]*)?(,[ ]*[1-9][0-9]*[abcd]*(:[1-9][0-9]*[abcd]*)?)*)( ([A-Z]+))?\))/gm);
 const snippetsRE = xre(/\*\*([^*])+\*\*/g);
 const bookReplaceRE = /\s*[0-9]+:.*/;
@@ -12,6 +31,9 @@ const placeholderQuotedRE = /'([^']+)'/g;
 const placeholderRE = /<!-- SCRIPTURE [^>]+>/g;
 
 // Get original markdown
+
+// We need a string for the regexes to work on
+
 const inPath = path.resolve(process.argv[2]);
 const md = fse.readFileSync(inPath).toString();
 
@@ -20,6 +42,20 @@ console.log(md);
 console.log("\n\n############################\n\n")
 
 // Extract quotes, make placeholders
+
+// Placeholders look like this:
+// <!-- SCRIPTURE 'Psalm 78:52' 'ULT' 'sheep' 'flock' -->
+
+// From here on we're storing various things in arrays, all of which
+// happen to have the same length. For a module I'd build a more interesting
+// data structure
+
+// We do the regexing in several bites
+
+// We don't try to fix the randomness in book names here
+
+// Here and elsewhere we use a common JS idiom to dedupe arrays using sets.
+
 let placeholders = [];
 let rawReferences = [];
 let books = new Set([]);
@@ -47,6 +83,10 @@ for (const match of xre.match(md, quotationRE)) { // capture whole quote plus re
 }
 
 // Replace quotes with placeholders
+
+// The 'return text with side-effect' should probably not go into production
+// but it is kinda cool.
+
 let repN = 0;
 const placeholderN = str => placeholders[repN++]
 let mmd = xre.replace(md, quotationRE, placeholderN);
@@ -54,6 +94,9 @@ console.log("# Placeholders in situ #");
 console.log(mmd);
 
 // Normalize scripture references
+
+// I produced this by printing out the value of the set 'books'
+// In French this will be a long list because of n ways to use accents
 
 const bookCodes = {
     '2 Samuel': "2SA",
@@ -77,6 +120,13 @@ console.log("# Normalize references #");
 console.log(normalizedReferences.join("\n"));
 
 // Load required USFM books into Proskomma
+
+// Loading USFM is the slowest thing about Proskomma
+// That's because it does a lot of processing at parse time
+// Also, uW USFM is the worst case because of the embedded alignment information
+// In production I'd first make a succinct representation of the whole translation
+// (or, preferably, get one from Diegesis)
+
 const pk = new Proskomma();
 const uniqueBooks = Array.from(new Set(Object.values(bookCodes)));
 console.log("# Unique books #");
@@ -97,6 +147,16 @@ for (const book of uniqueBooks) {
 }
 
 // Find replacement text by reference
+
+// In this case we seem to want plain text by paragraph, which we get via blocks
+// of the main sequence (ie the bits God wrote).
+
+// There are several ways to do cv in Proskomma - the query includes a second option
+
+// Proskomma uses linear search because indexed burn memory. In production I'd probably
+// collect all the bcvs needed and then collect them all in one sweep of all documents
+// which would be orders of magnitude faster for a large number of references.
+
 console.log(`# Finding replacement text for references #`);
 const replacementTexts = [];
 for (const ref of normalizedReferences) {
@@ -142,6 +202,9 @@ for (const ref of normalizedReferences) {
 }
 
 // Build text to drop back into markdown
+
+// The current code will only highlight each snippet once per verse
+
 let replacementMDs = [];
 for (let n=0; n<replacementTexts.length; n++) {
     let replacement = replacementTexts[n];
@@ -159,6 +222,9 @@ for (let n=0; n<replacementTexts.length; n++) {
 }
 
 // Drop text back into markdown to replace placeholders
+
+// Same side-effect trick as above
+
 console.log(`# Replace placeholders with new text #`);
 repN = 0;
 const replacementMDN = str => replacementMDs[repN++]
