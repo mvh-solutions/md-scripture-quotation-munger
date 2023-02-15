@@ -8,6 +8,7 @@ const quotationRE = xre(/(^[ ]*(>[ ]+[^\n\r)]+)[\n\r]+)*(^[ ]*>[ ]+[^\n\r]+\((([
 const snippetsRE = xre(/\*\*([^*])+\*\*/g);
 const bookReplaceRE = /\s*[0-9]+:.*/;
 const notBookReplaceRE = /^([1-6] )?\S+\s/;
+const placeholderQuotedRE = /'([^']+)'/g;
 const placeholderRE = /<!-- SCRIPTURE [^>]+>/g;
 
 // Get original markdown
@@ -99,6 +100,9 @@ for (const book of uniqueBooks) {
 console.log(`# Finding replacement text for references #`);
 const replacementTexts = [];
 for (const ref of normalizedReferences) {
+    if (ref.includes('?')) {
+        throw new Error(`Cannot look up reference '${ref}' - do you need to add more bookCode normalizing?`);
+    }
     const query = `{
       docSet(id: "eng_ult") {
         document(bookCode: """${ref.replace(bookReplaceRE, "")}""") {
@@ -140,7 +144,16 @@ for (const ref of normalizedReferences) {
 // Build text to drop back into markdown
 let replacementMDs = [];
 for (let n=0; n<replacementTexts.length; n++) {
-    const replacementMD = `${replacementTexts[n].map(p => `> ${p}`).join('\n')} (${rawReferences[n]})\n`;
+    let replacement = replacementTexts[n];
+    const placeholder = placeholders[n];
+    const placeholderQuotedBits = xre.match(placeholder, placeholderQuotedRE)
+        .map(b => b.replace(/'/g, ""));
+    const source = placeholderQuotedBits[1];
+    const snippets = placeholderQuotedBits.slice(2);
+    for (const snippet of snippets) {
+        replacement = replacement.map(r => r.replace(`${snippet}`, `**${snippet}**`));
+    }
+    const replacementMD = `${replacement.map(p => `> ${p}`).join('\n')} (${rawReferences[n]} ${source.replace(/'/g, "")})\n`;
     replacementMDs.push(replacementMD);
     console.log(replacementMD);
 }
